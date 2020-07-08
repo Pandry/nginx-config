@@ -1,0 +1,2 @@
+fastcgi_pass unix:/run/php7.0-fpm.sock;
+include conf/php/_php.conf;
