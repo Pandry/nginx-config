@@ -20,6 +20,11 @@ After doing so, restore the privileges of the folder:
 restorecon -Rv /var/www
 ```
 
+And make sure that NGINX can act as a reverse proxy
+```
+setsebool -P httpd_can_network_connect 1
+```
+
 # Completing the installation process
 To provide a "working by default" configuration, the configuration file does not provide a self-signed certificate (since it needs to be created).  
 To complete the install process, as [written in the confiuration file](https://Github.com/Pandry/nginx-config/src/branch/master/nginx.conf#L66-L78), you need to execute this command:  
