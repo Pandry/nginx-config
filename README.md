@@ -75,3 +75,67 @@ yum install certbot -y
 certbot certonly --webroot --agree-tos --email admin@domain.com -w /var/www/httpschallenges/.well-known/acme-challenge -d service.com
 
 ```
+
+# Sample `docker-compose.yml` file with Let's Encrypt
+
+```
+version: '3.7'
+services:
+  nginx:
+    image: nginx
+    ports:
+      - 80:80/tcp
+      - 443:443/tcp
+    volumes:
+      - /etc/nginx:/etc/nginx:ro
+      - /var/log/nginx:/var/log/nginx:rw
+      - /var/www:/var/www:ro
+      - /etc/ssl/:/etc/ssl:ro
+      - /etc/letsencrypt/archive:/etc/archive:ro
+    logging:
+      options:
+        max-size: "10m"
+      driver: json-file
+    networks:
+      - nginx
+    command: "/bin/sh -c 'while :; do sleep 1h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
+
+  certbot:   
+    image: certbot/certbot
+    volumes:
+      - /etc/nginx:/etc/nginx:ro
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/lib/letsencrypt:/var/lib/letsencrypt
+      - /etc/ssl/:/etc/letsencrypt/live
+      - /var/www/httpschallenges:/var/www/httpschallenges
+      - /var/log/letsencrypt:/var/log/letsencrypt
+    networks:
+      - nginx
+    logging:
+      options:
+        max-size: "1m"
+        max-file: "10"
+      driver: json-file
+    entrypoint: 
+      - /bin/sh
+      - -c 
+      - |
+        trap exit TERM; while :; do 
+          for CONFIG_FILE in /etc/nginx/sites/*.vh
+          do
+            DOMAINS=$$(grep -h '[^$$#]\s*server_name' $$CONFIG_FILE | sed -r 's/[[:blank:]]*server_name[[:blank:]]+(.*;[[:blank:]]*#[[:blank:]]*NL)?//' | sed '/^[[:blank:]]*$$/d' | sed -r 's/[[:blank:]]+/ /g' | rev | cut -c 2- | rev)
+            if [ $$(echo $$DOMAINS | wc -w)  -gt 0 ]
+            then
+              echo -e "[\033[0;32mOK!\033[0m] [$$DOMAINS] Geting HTTPS certificate(s) for $$CONFIG_FILE"
+              certbot certonly --non-interactive --webroot --agree-tos -m admin@test.com $$(echo $$DOMAINS | xargs -n 1 echo -w /var/www/httpschallenges -d | tr '\n' ' ')
+            fi
+          done
+          #certbot certonly --non-interactive --webroot --agree-tos -m admin@test.com $$(grep -h '[^$$#]\s*server_name' /etc/nginx/sites/*.vh | sed -r 's/[[:blank:]]*server_name[[:blank:]]+(.*;[[:blank:]]*#[[:blank:]]*NL)?//' | sed '/^[[:blank:]]*$$/d' | sed -r 's/[[:blank:]]+/ /g' | rev | cut -c 2- | rev | xargs -n 1 echo -w /var/www/httpschallenges -d | tr '\n' ' ')
+          chown -R 101:101 /etc/letsencrypt/archive/*/*.pem 2> /dev/null || echo "No cert found!"
+          sleep 12h & wait $${!}; 
+        done;
+
+networks:
+  nginx:
+    name: web
+```
