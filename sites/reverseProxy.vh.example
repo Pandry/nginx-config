@@ -15,7 +15,7 @@ server {
         proxy_pass https://google.com;
         proxy_set_header Host "www.google.com";
         
-        include conf/proxy.conf
+        include conf/proxy.conf;
     }
  
     include conf/common.conf;
