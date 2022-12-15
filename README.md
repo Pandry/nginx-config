@@ -139,3 +139,79 @@ networks:
   nginx:
     name: web
 ```
+
+## Monitoring with prometheus
+Since nginx exposes only metrics for the pay stuff, we need to rely on 3rd party modules (the awesome [nginx-module-vts](https://github.com/vozlt/nginx-module-vts) module!)  
+And since we (I) don't really want to tamper too much with the base image, I've compiled the module as dynamic, with this Dockerfile (copied from the [hermanbanken's gist](https://gist.github.com/hermanbanken/96f0ff298c162a522ddbba44cad31081)):
+
+Copy the following to in a `Dockerfile.vts`  
+```Dockerfile
+FROM nginx:alpine AS builder
+RUN wget "http://nginx.org/download/nginx-${NGINX_VERSION}.tar.gz" -O nginx.tar.gz
+apk add --no-cache --virtual .build-deps \
+  gcc \
+  libc-dev \
+  make \
+  openssl-dev \
+  pcre-dev \
+  zlib-dev \
+  linux-headers \
+  curl \
+  gnupg \
+  libxslt-dev \
+  gd-dev \
+  geoip-dev \
+  git 
+
+RUN git clone https://github.com/vozlt/nginx-module-vts.git && \
+    mkdir -p /usr/src && \
+    CONFARGS=$(nginx -V 2>&1 | sed -n -e 's/^.*arguments: //p') \
+    tar -zxC /usr/src -f nginx.tar.gz && \
+    cd /usr/src/nginx-$NGINX_VERSION && \
+    ./configure --with-compat $CONFARGS --add-dynamic-module=/nginx-module-vts && \
+    make && make install
+```
+
+Now we need to compile & build the image and copy the file
+```bash
+IMAGE=builder-nginx-alpine-vts
+docker build Dockerfile.vts -t $IMAGE
+id=$(docker create $IMAGE)
+docker cp $id:/usr/local/nginx/modules/ngx_http_vhost_traffic_status_module.so .
+docker rm -v $id
+```
+
+And now you have in your working dir the `ngx_http_vhost_traffic_status_module.so`  
+You can now put it a volume:
+
+```yaml
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx
+    # ...
+    volumes:
+      - ./ngx_http_vhost_traffic_status_module.so:/usr/local/nginx/modules/ngx_http_vhost_traffic_status_module.so
+```
+
+and configure it in the `/etc/nginx/nginx.conf` file:  
+
+```
+load_module /usr/local/nginx/modules/ngx_http_vhost_traffic_status_module.so;
+# ...
+http {
+        vhost_traffic_status_zone;
+        # ...
+        server {
+            listen 8828;
+            server_name mynginx.stat.page.internal.lan.log.name.lol;
+            #location /status {
+            #    stub_status;
+            #}
+            location /metrics {
+                vhost_traffic_status_display;
+                vhost_traffic_status_display_format prometheus;
+            }
+        }
+        # ...
+```
